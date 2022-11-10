@@ -1,0 +1,51 @@
+#loading the required libraries
+library(rpostgis)
+library(RPostgreSQL)
+library(DBI)
+library(dplyr)
+library(rgeos)
+library(sf)
+suppressMessages(library(wkb))
+library("ggplot2")
+
+drv <- dbDriver("PostgreSQL")
+conn <- dbConnect(drv, host = "localhost", port= 5050, dbname = "Your_database_name", user = "postgres")
+dbListTables(conn)
+
+data1=dbGetQuery(conn,'
+SELECT schools.gid AS school_gid,
+       schools.name AS school,
+       health.f_name AS health,
+       health.gid AS health_gid,
+       health.geom::geometry(point, 4326) AS health_geom,
+       health.dist
+FROM  schools
+CROSS JOIN LATERAL (
+  SELECT health.f_name, health.geom, health.gid, health.geom <-> schools.geom AS dist
+  FROM health AS health
+  ORDER BY dist
+  LIMIT 1                                                                                                          
+) health;')
+print(data1)
+
+pgInsert(conn, c("public", "school"), data1, new.id = NULL, partial.match = FALSE)
+
+data2 = dbGetQuery(conn,'
+SELECT sum(dist) 
+FROM (
+  SELECT health_gid, ST_DistanceSphere(health_geom, lead(health_geom) OVER(ORDER BY health_gid)) as dist 
+  FROM school) sub;')
+print(data2)
+#Path to where data set is saved e.g "D:\\My Work\\Assign5\\Health Facility.shp"
+const= st_read("Path to where data set is saved\\Kisumu West.shp")
+school= st_read("Path to where data set is saved\\Schools.shp")
+health= st_read("Path to where data set is saved\\Health Facility.shp")
+
+
+ggplot() + 
+  geom_sf(data = const, fill = "grey", color = "black") +
+  geom_sf(data = school, color= "purple") +
+  geom_sf(data = health, color= "blue") +
+  ggtitle("Nearest Facility") + 
+  coord_sf()
+ggsave("Path to save your work\\Your file name.pdf", width=6, height=6, dpi="screen")
